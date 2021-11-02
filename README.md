@@ -2,11 +2,11 @@
 
 FILPAL is a klipper enviroment comprised of macros, modified python files, and stored gcode files which collectively allow klipper to calibrate and store filament specific parameters on the machine side of the printing workflow. This allows klipper to automatically adjust firmware and print settings for sliced gcode, superceding those in the gcode. Parameters that FILPAL can calibrate, record, and inject includes:
 
--Temperature (bed, hotend, as well as varying temperatures such as initial layer temps)
--Fan Speeds (again, with varying speeds adjusted accordingly)
--Z offset (for plastics which require different levels of "squish")
--Flowrate (see caviats for details, but TLDR requires slicer flowrate to be set to 100% to work properly)
--Retraction (provided firmware retraction is enabled)
+- Temperature (bed, hotend, as well as varying temperatures such as initial layer temps)
+- Fan Speeds (again, with varying speeds adjusted accordingly)
+- Z offset (for plastics which require different levels of "squish")
+- Flowrate (see caviats for details, but TLDR requires slicer flowrate to be set to 100% to work properly)
+- Retraction (provided firmware retraction is enabled)
 
 
 In addition to storing and injecting this information, FILPAL allows for onboard calibration of the above parameters *without any slicing needed*.  This is due to presliced calibration files stored in the Klipper Pi itself that can be called/started from the klipper command prompt. 
