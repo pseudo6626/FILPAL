@@ -41,6 +41,8 @@ class FILPAL:
         cmd_FILPAL_INJECTOR_help = "Runs converted gcode files and acts as a middle man for the commands"
         self.gcode.register_command('FILPAL_UPDATER', self.cmd_FILPAL_UPDATER, desc=self.cmd_FILPAL_UPDATER_help)
         cmd_FILPAL_UPDATER_help = "Updates your fil.pal file with new parameter settings for a given plastic."
+        self.gcode.register_command('FILPAL_SWAP', self.cmd_FILPAL_SWAP, desc=self.cmd_FILPAL_SWAP_help)
+        cmd_FILPAL_SWAP_help = "Used to assist in filament swaping"
 
     def cmd_FILPAL_CALIBRATE(self, gcmd):  #this command is used by filpal to run calibration tests for the different filament parameters it can regulate
         test = gcmd.get('TEST')
