@@ -77,7 +77,7 @@ class FILPAL:
 
     def cmd_FILPAL_SWAP(self, gcmd): #this command is used by filpal to swap between filaments
         un_bool=gcmd.get("UNLOAD",True)
-        load_name=gcmd.get("LOAD",False)
+        self.load_name=gcmd.get("LOAD",False)
         load_temp=gcmd.get("LOAD_TEMP",False)
         un_temp=gcmd.getint("UNLOAD_TEMP",False)
         if load_name != False and load_temp == False:
@@ -113,13 +113,15 @@ class FILPAL:
         self.gcode.run_script_from_command("G1 F1000 E-500")
 
         if load_temp != False:
+            cmd_FILPAL_UPDATER(self, {"NEW_LOAD":self.load_name})
             self.gcode.run_script_from_command("SET_HEATER_TEMPERATURE HEATER=%s TARGET=%d" % (heater_name,load_temp))
             self.gcode.respond_info("Insert new filament and use command LOAD_CONTUNUE when ready to extrude")
             self.gcode.register_command('LOAD_CONTINUE', self.cmd_LOAD_CONTINUE, desc=self.cmd_LOAD_CONTINUE_help)
             cmd_LOAD_CONTINUE_help = "contiunues the filament load of FILPAL_SWAP"
             def cmd_LOAD_CONTINUE(self,gcmd):
                 self.gcode.run_script_from_command("G1 F100 E500")
-                #add code to update the current loaded fillament in fil.pal file
+
+                
 
 
     def cmd_FILPAL_CONVERTER(self, gcmd): #this command is used by filpal to parse through an existing gcode file and pull all of the numerical values associated with specfifc gcode commands. It then adds a line at the start of the gcode with a dictionary of these values
@@ -132,6 +134,7 @@ class FILPAL:
     def cmd_FILPAL_UPDATER(self, gcmd):  #this command is used to update the parameter values in fil.pal for the loaded filament. Also can create new parameters if in the accepted list
         fila ={}
         fil_id=gcmd.get("FILA_ID",False)
+        new_load=gcmd.get("NEW_LOAD",False)
         allowed_params=["hotend_min_temp","hotend_max_temp","hotend_initial_temp","hotend_temp","retraction","fan_min","fan_max","z_offset","filament_type","flowrate"]
         if gcmd.get("lookup") != True:    
             param=gcmd.get("PARAM",False)
@@ -144,6 +147,10 @@ class FILPAL:
             varfile.read(self.params_file)
             f.close()
             if varfile.has_section('loaded'):
+                if new_load:
+                    varfile.set("loaded","fila_id",str(new_load))
+                    if varfile.has_section(str(new_load)) ==False:
+                        varfile.add_section(str(new_load))
                 if fil_id == False:
                     id=ast.literal_eval(varfile["loaded"]["fila_id"])
                 else:
