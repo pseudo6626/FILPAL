@@ -11,12 +11,15 @@ class FILPAL:
         self.printer = config.get_printer()
         self.gcode = self.printer.lookup_object('gcode')
         try:
-             self.params_path=self.printer.getstring("filament_parameters_file_location:")
+             self.params_path=self.printer.getstring("filament_parameters_file_location")
              self.params_file=os.path.expanduser(self.params_path)
         except:
             raise config.error("cannot locate filament parameters file")
-        sd = config.get('path')
-        self.sdcard_dirname = os.path.normpath(os.path.expanduser(sd))
+        try:
+             self.parse_commands=self.printer.get("parse_commands")
+             self.parse_commands=ast.literal_eval(self.parse_commands)
+        except:
+            raise config.error("cannot locate parse_commands dict or dict is not formatted correctly")
         sd = config.get('path')
         self.sdcard_dirname = os.path.normpath(os.path.expanduser(sd))
         self.cali_files=os.listdir(self.sdcard_dirname)
@@ -124,13 +127,61 @@ class FILPAL:
                 
 
 
-    def cmd_FILPAL_CONVERTER(self, gcmd): #this command is used by filpal to parse through an existing gcode file and pull all of the numerical values associated with specfifc gcode commands. It then adds a line at the start of the gcode with a dictionary of these values
-        SD
+    def cmd_FILPAL_PARSER(self, gcmd): #this command is used by filpal to parse through an existing gcode file and pull all of the numerical values associated with specfifc gcode commands. It then adds a line at the start of the gcode with a dictionary of these values
+        filename=gcmd.get("FILE_NAME",False)
+        fname = os.path.join(self.sdcard_dirname, filename.lower())
+        fs = open(fname, 'r')
+        trycodes=[]
+        
+        try:
+            list_of_lines = fs.readlines()
+            if ";PARSED" not in list_of_lines[0]:
+                for command in self.parse_commands:
+	                trycodes.append({"command" : command})
+                for l in range(len(trycodes)):
+                    for z in enumerate(list_of_lines):
+                        if trycodes[l]["command"] in z[1]:
+                            lineparams=z[1].split()
+                            for m in range(len(lineparams)-1):
+                                if lineparams[m+1][0] in trycodes[l].keys():
+                                    trycodes[l][lineparams[m+1][0]].append(float(lineparams[m+1][1:]))
+                                    trycodes[l][lineparams[m+1][0]].sort()
+                                else:
+                                    trycodes[l].update({lineparams[m+1][0] : [float(lineparams[m+1][1:])]})
+                        elif "START_PRINT" in z[1]:
+                            start_line=z[0]
+                list_of_lines[0]=list_of_lines[0].split("\n")[0]+" ;PARSED\n"
+                list_of_lines[start_line]=list_of_lines[start_line].split("\n")[0]+" parse_vals="+str(trycodes)+"\n"
+                newvers=open(fname,"w")
+                newvers.writelines(list_of_lines)
+                newvers.close
+            else:
+                raise self.printer.command_error("File already Parsed")
+            f = open(fname, 'rb')
+            f.seek(0, os.SEEK_END)
+            fsize = f.tell()
+            f.seek(0)
+        except:
+            logging.exception("virtual_sdcard file open")
+            raise gcmd.error(lineparams)
+        gcmd.respond_raw("File opened:%s Parse Success" % (filename))
 
 
     def cmd_FILPAL_INJECTOR(self, gcmd):  #This command is used by filpal to intercept specific commands from the gcode and modify their numerical values using the dictionary before passing them on to klipper propper
-        SDFSFF
-
+        inj_list=self.parse_commands
+        try:
+            parse_vals=gcmd.get('parse_vals')
+            parse_vals=ast.literal_eval(parse_vals)
+        except:
+            msg = "Unable to retrieve file parse values"
+            logging.exception(msg)
+            raise self.printer.command_error(msg)
+        for i in inj_list:
+            for j in parse_vals:
+                if parse_vals[j]['command'] == i and inj_list[i] == False:
+                    parse_vals.pop(j)
+        #run a curve fit for each command's data, then set up an interupt signal for each command
+        
     def cmd_FILPAL_UPDATER(self, gcmd):  #this command is used to update the parameter values in fil.pal for the loaded filament. Also can create new parameters if in the accepted list
         fila ={}
         fil_id=gcmd.get("FILA_ID",False)
@@ -182,7 +233,7 @@ class FILPAL:
                     raise self.printer.command_error(msg)
         if param:
             if param in fila:
-                varfile.set(id,param,str(param_val))  #this isnt the correct way to update the file. need to write to actual file
+                varfile.set(id,param,str(param_val))  
             elif param in allowed_params:
                 varfile.set(id,param,str(param_val))
             else:
@@ -192,6 +243,11 @@ class FILPAL:
         f=open(self.params_file,"w")
         varfile.write(f)
         f.close()
+
+    def curve_fit(self,data):
+        dsd
+
+
 
 def load_config(config):
     return FILPAL(config)
