@@ -1,0 +1,9 @@
+[loaded]
+fila_id = "veracity_pla"
+
+[veracity_pla]
+M104={S:[200,214,220]}
+
+
+[atomic_petg]
+M104={S:[240,255,265]}
