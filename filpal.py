@@ -23,18 +23,20 @@ class FILPAL:
         sd = config.get('path')
         self.sdcard_dirname = os.path.normpath(os.path.expanduser(sd))
         self.cali_files=os.listdir(self.sdcard_dirname)
-        self.fila ={}
-        varfile = configparser.ConfigParser()
-        try:
-            varfile.read(self.params_file)
-            if varfile.has_section('Loaded'):
-                if varfile.has_section(varfile["Loaded"]["fila_ID"]):
-                    for name, val in varfile.items('Variables'):
-                        self.fila[name] = ast.literal_eval(val)    
-        except:
-            msg = "Unable to parse Loaded Filament paramters. Please run FILPAL_LOAD or update the parameters file"
-            logging.exception(msg)
-            raise self.printer.command_error(msg)
+        self.coeffs=[]
+        self.controller=[]
+#        self.fila ={}
+#        varfile = configparser.ConfigParser()
+#        try:
+#            varfile.read(self.params_file)
+#            if varfile.has_section('Loaded'):
+#                if varfile.has_section(varfile["Loaded"]["fila_ID"]):
+#                    for name, val in varfile.items('Variables'):
+#                        self.fila[name] = ast.literal_eval(val)    
+#        except:
+#            msg = "Unable to parse Loaded Filament paramters. Please run FILPAL_LOAD or update the parameters file"
+#            logging.exception(msg)
+#            raise self.printer.command_error(msg)
 
         self.gcode.register_command('FILPAL_CALIBRATE', self.cmd_FILPAL_CALIBRATE, desc=self.cmd_FILPAL_CALIBRATE_help)
         cmd_FILPAL_CALIBRATE_help = "Runs calibration tests for filament parameters"
@@ -83,11 +85,11 @@ class FILPAL:
         self.load_name=gcmd.get("LOAD",False)
         load_temp=gcmd.get("LOAD_TEMP",False)
         un_temp=gcmd.getint("UNLOAD_TEMP",False)
-        if load_name != False and load_temp == False:
+        if self.load_name != False and load_temp == False:
             try:
-                fila=cmd_FILPAL_UPDATER(self,{"lookup":True,"FILA_ID":load_name})
-                if "hotend_temp" in fila:
-                    load_temp=int(fila["hotend_temp"])
+                fila=cmd_FILPAL_UPDATER(self,{"lookup":True,"FILA_ID":self.load_name})
+                if "M104" in fila:
+                    load_temp=int(fila["M104"]["S"][math.floor(len(fila["M104"]["s"])/2)])
             except:
                 msg = "New Filament does not have 'hotend_temp' defined. Please run FILPAL_LOAD or update the parameters file"
                 logging.exception(msg)
@@ -95,8 +97,8 @@ class FILPAL:
         elif un_bool:
             try:
                 fila=cmd_FILPAL_UPDATER(self,{"lookup":True})
-                if "hotend_temp" in fila:
-                    un_temp=int(fila["hotend_temp"])
+                if "M104" in fila:
+                    un_temp=int(fila["M104"]["S"][math.floor(len(fila["M104"]["s"])/2)])
             except:
                 msg = "Loaded Filament does not have 'hotend_temp' defined. Please run FILPAL_LOAD or update the parameters file"
                 logging.exception(msg)
@@ -108,10 +110,7 @@ class FILPAL:
         except self.printer.config_error as e:
             raise gcmd.error(str(e))
         self.gcode.run_script_from_command("SET_HEATER_TEMPERATURE HEATER=%s TARGET=%d" % (heater_name,un_temp))
-        curtemp=0
-        while curtemp < un_temp:
-            temp_call=heater.get_temp(self,self.eventtime)
-            curtemp=temp_call[0]
+        self.gcode.run_script_from_command("TEMPERATURE_WAIT SENSOR=%s MINIMUM=%d" % (heater_name,un_temp))
         self.gcode.run_script_from_command("G1 F100 E1")
         self.gcode.run_script_from_command("G1 F1000 E-500")
 
@@ -169,6 +168,9 @@ class FILPAL:
 
     def cmd_FILPAL_INJECTOR(self, gcmd):  #This command is used by filpal to intercept specific commands from the gcode and modify their numerical values using the dictionary before passing them on to klipper propper
         inj_list=self.parse_commands
+        fila=cmd_FILPAL_UPDATER(self,{"lookup":True})
+        stored=[]
+        self.coeffs=[]
         try:
             parse_vals=gcmd.get('parse_vals')
             parse_vals=ast.literal_eval(parse_vals)
@@ -177,16 +179,43 @@ class FILPAL:
             logging.exception(msg)
             raise self.printer.command_error(msg)
         for i in inj_list:
+            if i in fila:
+                stored.append([i,fila[i]])
             for j in parse_vals:
-                if parse_vals[j]['command'] == i and inj_list[i] == False:
-                    parse_vals.pop(j)
-        #run a curve fit for each command's data, then set up an interupt signal for each command
-        
+                if parse_vals[j]['command'] == i and inj_list[i] == True:
+                    for k in parse_vals[j]:
+                        if k in fila[i]:
+                            stored[-1].append(parse_vals[k])
+        for l in stored:
+            self.coeffs.append=[l[0],curve_fit(l[1]['S'],l[2]['S'])]
+
+            if l[0] == "M104" or "M109":
+                heater = self.printer.lookup_object('toolhead').get_extruder().get_heater()
+                old=heater.set_control("placehold")
+                heater.set_control(filpal_hotend_controller(self,old,self.coeffs[-1]))
+                class filpal_hotend_controller:
+                    def __init__(self,old_control,coeff):
+                        self.old_controller=old_control
+                        self.coeff=coeff
+                    
+                    def temperature_update(self, read_time, temp, target_temp):
+                        new_target=self.coeff[0]+self.coeff[1]*target_temp+self.coeff[2]*target_temp*target_temp
+                        self.old_controller.temperature_update(self, read_time, temp, new_target)
+
+                    def check_busy(self, eventtime, smoothed_temp, target_temp):
+                        self.old_controller.check_busy(self, eventtime, smoothed_temp, target_temp)
+                    
+                    def reset(self):
+                        return self.old_controller
+
+        #switch statements for each command to create a new control class for each as formatted in Klipper
+        #make another function called in END_GCODE to revert controllers back to normal
+
     def cmd_FILPAL_UPDATER(self, gcmd):  #this command is used to update the parameter values in fil.pal for the loaded filament. Also can create new parameters if in the accepted list
         fila ={}
         fil_id=gcmd.get("FILA_ID",False)
         new_load=gcmd.get("NEW_LOAD",False)
-        allowed_params=["hotend_min_temp","hotend_max_temp","hotend_initial_temp","hotend_temp","retraction","fan_min","fan_max","z_offset","filament_type","flowrate"]
+        allowed_params=["M104","M140","retraction","fan_min","fan_max","z_offset","filament_type","flowrate"]
         if gcmd.get("lookup") != True:    
             param=gcmd.get("PARAM",False)
             param_val=gcmd.getfloat("VALUE",False)
@@ -244,9 +273,60 @@ class FILPAL:
         varfile.write(f)
         f.close()
 
-    def curve_fit(self,data):
-        dsd
 
+    def curve_fit(self,stored_data,raw_data):
+        raw=raw_data.sort()
+        stored=stored_data.sort()
+        c0=0
+        c1=0
+        c2=0
+
+        if len(stored) == 1 or len(raw) == 1:
+            raw_mid=math.floor(len(raw)/2)
+            stored_mid=math.floor(len(stored)/2)
+            c1=stored[stored_mid]/raw[raw_mid]
+    
+        elif len(stored) == 2:
+	        for i in range(0,len(stored)-1):
+		        c1=(stored[i+1]-stored[i])/(raw[i+1]-raw[i])
+                c0=stored[0]-c1*raw[0]
+        elif len(stored) == 3 and len(raw) < 3:
+	        for i in range(0,len(raw)-1):
+		        c1=(stored[i+1]-stored[i])/(raw[i+1]-raw[i])
+                c0=stored[0]-c1*raw[0]
+        elif len(stored) == 3 and len(raw) >=3:
+            n=3
+            x1=raw[0]+raw[1]+raw[2]
+            x2=raw[0]**2+raw[1]**2+raw[2]**2
+            x3=raw[0]**3+raw[1]**3+raw[2]**3
+            x4=raw[0]**4+raw[1]**4+raw[2]**4
+            y1=stored[0]+stored[1]+stored[2]
+            x1y1=stored[0]*raw[0]+stored[1]*raw[1]+stored[2]*raw[2]
+            x2y1=stored[0]*raw[0]*raw[0]+stored[1]*raw[1]*raw[1]+stored[2]*raw[2]*raw[2]
+            det=n*(x2*x4-x3*x3)-x1*(x1*x4-x3*x2)+x2*(x1*x3-x2*x2)
+            if det != 0:
+                m11=x2*x4-x3*x3
+                m12=x3*x2-x1*x4
+                m13=x1*x3-x2*x2
+                m21=x2*x3-x1*x4
+                m22=n*x4-x2*x2
+                m23=x1*x2-n*x3
+                m31=x1*x3-x2*x2
+                m32=x2*x1-n*x3
+                m33=n*x2-x1*x1
+                m11=m11/det
+                m12=m12/det
+                m13=m13/det
+                m21=m21/det
+                m22=m22/det
+                m23=m23/det
+                m31=m31/det
+                m32=m32/det
+                m33=m33/det
+                c0=m11*y1+m12*x1y1+m13*x2y1
+                c1=m21*y1+m22*x1y1+m23*x2y1
+                c2=m31*y1+m32*x1y1+m33*x2y1 
+        return c0,c1,c2
 
 
 def load_config(config):
